@@ -5,15 +5,18 @@
   "keywords": [],
   "main": "src/index.tsx",
   "dependencies": {
+    "firebase": "12.10.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-scripts": "^5.0.0",
-    "firebase": "12.10.0",
-    "react-media-recorder": "1.7.2"
+    "react-media-recorder": "1.7.2",
+    "react-router-dom": "^7.13.1",
+    "react-scripts": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
+    "ajv": "^7.2.4",
+    "ajv-keywords": "^5.1.0",
     "loader-utils": "3.2.1",
     "typescript": "5.7.2"
   },

@@ -18,22 +18,22 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useReactMediaRecorder } from "react-media-recorder";
 import { signOut, updateProfile } from "firebase/auth";
 import { db, storage, auth } from "./firebase";
-
 // Импортируйте файл с глобальными банами/мутами (создайте text.js рядом)
 import { bannedUids, mutedUids } from "./text";
-
+import { useNavigate, useLocation } from "react-router-dom";
 export default function ChatScreen({ user }) {
   const [text, setText] = useState("");
   const [messages, setMessages] = useState([]);
   const [displayName, setDisplayName] = useState(user?.displayName || "");
-  const [changeNameMode, setChangeNameMode] = useState(false);
+  //const [changeNameMode, setChangeNameMode] = useState(false);
   const [myUserData, setMyUserData] = useState(null);
   const [usersData, setUsersData] = useState({});
   const [contextMenu, setContextMenu] = useState(null);
   const [pendingImage, setPendingImage] = useState(null); // файл, который выбрали, но ещё не отправили
   const [previewUrl, setPreviewUrl] = useState(null); // временная ссылка для превью
   const [imageCaption, setImageCaption] = useState("");
-
+  const navigate = useNavigate();
+  const location = useLocation();
   const inputContainerRef = useRef(null); // ref на форму ввода
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -85,6 +85,18 @@ export default function ChatScreen({ user }) {
         .catch(console.error);
     });
   }, [messages]);
+
+  // В начале компонента ChatScreen, после всех useState и useRef
+
+  useEffect(() => {
+    if (user?.uid && !user.isAnonymous) {
+      updateDoc(doc(db, "users", user.uid), {
+        lastReadGeneralChat: serverTimestamp(),
+        // если позже добавишь поле unreadGeneralChat: number
+        // unreadGeneralChat: 0
+      }).catch(console.error);
+    }
+  }, [user?.uid]); // зависимости только от uid, чтобы срабатывало один раз при входе
 
   // Слушаем сообщения
   useEffect(() => {
@@ -427,22 +439,15 @@ export default function ChatScreen({ user }) {
           borderBottom: "1px solid #e5e7eb",
           position: "relative",
           flexShrink: 0,
-          display: "flex", // ← добавляем flex для выравнивания
+          display: "flex",
           alignItems: "center",
-          justifyContent: "space-between", // ← важно!
+          justifyContent: "space-between",
         }}
       >
         {/* Левая часть — кнопка Назад */}
         <button
           onClick={() => {
-            // Вариант 1: React Router (самый правильный)
-            // navigate("/chats");   // раскомментируйте, если есть useNavigate
-
-            // Вариант 2: если нет роутера — просто переход
-            window.location.href = "/chats"; // или "/"; или куда нужно
-
-            // Вариант 3: если это модальное окно/экран в навигации
-            // window.history.back();
+            window.history.back(); // ← это единственная строка, которая нужна
           }}
           style={{
             background: "transparent",
@@ -468,21 +473,22 @@ export default function ChatScreen({ user }) {
         </button>
 
         {/* Центральная часть — название и имя */}
-        <div style={{ flex: 1, textAlign: "center" }}>
+        <div
+          style={{
+            flex: 1,
+            justifyContent: "space-between",
+            textAlign: "center",
+          }}
+        >
           <h2
             style={{
-              margin: "0 0 3px 0",
+              margin: 0,
               fontSize: "1.25rem",
               fontWeight: 600,
             }}
           >
             Чат {isAdmin && "(Админ)"}
           </h2>
-          <div
-            style={{ fontSize: "0.82rem", color: "#6b7280", fontWeight: 500 }}
-          >
-            {user?.displayName || "Аноним"}
-          </div>
         </div>
 
         <div
@@ -495,22 +501,6 @@ export default function ChatScreen({ user }) {
             gap: "6px",
           }}
         >
-          {!user?.isAnonymous && (
-            <button
-              onClick={() => setChangeNameMode(!changeNameMode)}
-              style={{
-                padding: "5px 10px",
-                background: "#6b7280",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                fontSize: "0.8rem",
-                cursor: "pointer",
-              }}
-            >
-              ✎
-            </button>
-          )}
           {/* НОВАЯ КНОПКА — только для админа */}
           {isAdmin && (
             <button
@@ -544,76 +534,8 @@ export default function ChatScreen({ user }) {
               </svg>
             </button>
           )}
-          <button
-            onClick={handleSignOut}
-            style={{
-              padding: "5px 12px",
-              background: "#ef4444",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "0.8rem",
-              cursor: "pointer",
-            }}
-          >
-            Выйти
-          </button>
         </div>
       </div>
-
-      {/* Форма смены имени */}
-      {changeNameMode && (
-        <form
-          onSubmit={handleChangeName}
-          style={{
-            display: "flex",
-            gap: "6px",
-            padding: "8px 14px",
-            background: "white",
-            borderBottom: "1px solid #e5e7eb",
-          }}
-        >
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Новое имя"
-            style={{
-              flex: 1,
-              padding: "8px 12px",
-              border: "1px solid #d1d5db",
-              borderRadius: "6px",
-              fontSize: "0.95rem",
-            }}
-          />
-          <button
-            type="submit"
-            style={{
-              padding: "8px 14px",
-              background: "#3b82f6",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "0.9rem",
-            }}
-          >
-            OK
-          </button>
-          <button
-            type="button"
-            onClick={() => setChangeNameMode(false)}
-            style={{
-              padding: "8px 14px",
-              background: "#9ca3af",
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "0.9rem",
-            }}
-          >
-            ×
-          </button>
-        </form>
-      )}
 
       {/* Сообщения */}
       <div
@@ -658,22 +580,51 @@ export default function ChatScreen({ user }) {
                 <div
                   onClick={(e) => handleAvatarClick(e, m)}
                   style={{
-                    width: "32px",
-                    height: "32px",
+                    width: "34px", // ← было 42 → стало 34 (можно 32–36)
+                    height: "34px",
                     borderRadius: "50%",
+                    overflow: "hidden",
                     background: "#9ca3af",
-                    color: "white",
-                    fontSize: "0.9rem",
-                    fontWeight: "bold",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: "6px",
                     flexShrink: 0,
+                    marginRight: "10px",
+                    marginTop: "auto", // ← ключевое для прижатия вниз
+                    alignSelf: "flex-end", // ← прижимает к нижнему краю строки
                     cursor: isAdmin ? "pointer" : "default",
+                    border: "2px solid #e5e7eb",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
                   }}
                 >
-                  {avatarLetter}
+                  {usersData[m.uid]?.photoURL || m.photoURL ? (
+                    <img
+                      src={usersData[m.uid]?.photoURL || m.photoURL}
+                      alt={nameToShow}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = "";
+                      }}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "white",
+                        fontSize: "1rem", // чуть меньше, под новый размер
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {avatarLetter}
+                    </div>
+                  )}
                 </div>
               )}
 

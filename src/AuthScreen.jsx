@@ -1,29 +1,30 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInAnonymously,
   updateProfile,
 } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function AuthScreen({ onSuccess }) {
   const [mode, setMode] = useState("initial"); // initial | login | register
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
+  const [usernameStatus, setUsernameStatus] = useState(""); // "" | "checking" | "available" | "taken" | "short"
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const generateRandomUsername = (length = 12) => {
-    const chars =
-      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
+  // Генерация случайного имени для анонимов
+  const generateRandomUsername = (length = 10) => {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
     let result = "";
     for (let i = 0; i < length; i++) {
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return result;
+    return "anon_" + result;
   };
 
   const handleAnonymousLogin = async () => {
@@ -34,14 +35,12 @@ export default function AuthScreen({ onSuccess }) {
       const credential = await signInAnonymously(auth);
       const user = credential.user;
 
-      const randomName = "anon_" + generateRandomUsername(8); // например: anon_kJ9#mP2$nQ
+      const randomName = generateRandomUsername();
 
-      // Устанавливаем displayName
       await updateProfile(user, { displayName: randomName });
 
-      // Сохраняем в Firestore
       await setDoc(doc(db, "users", user.uid), {
-        username: randomName, // или можно prefix "anon_" + random
+        username: randomName,
         displayName: randomName,
         isAnonymous: true,
         createdAt: serverTimestamp(),
@@ -49,7 +48,8 @@ export default function AuthScreen({ onSuccess }) {
         photoURL: null,
       });
 
-      onSuccess(); // переходим в чат
+      // Важно: НЕ резервируем в usernames — анонимы не занимают нормальные ники
+      onSuccess();
     } catch (err) {
       setError(err.message || "Ошибка анонимного входа");
       console.error(err);
@@ -73,43 +73,83 @@ export default function AuthScreen({ onSuccess }) {
     }
   };
 
+  // Проверка username ТОЛЬКО в режиме регистрации
+  useEffect(() => {
+    if (mode !== "register" || !username) {
+      setUsernameStatus("");
+      return;
+    }
+
+    if (username.length < 3) {
+      setUsernameStatus("short");
+      return;
+    }
+
+    setUsernameStatus("checking");
+
+    const timer = setTimeout(async () => {
+      try {
+        const lower = username.trim().toLowerCase();
+        const usernameRef = doc(db, "usernames", lower);
+        const snap = await getDoc(usernameRef);
+
+        setUsernameStatus(snap.exists() ? "taken" : "available");
+      } catch (err) {
+        console.error("Ошибка проверки ника:", err);
+        setUsernameStatus("error");
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [username, mode]);
+
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    if (!username.trim()) {
-      setError("Введите username");
+    if (usernameStatus !== "available") {
+      setError(
+        usernameStatus === "short"
+          ? "Никнейм минимум 3 символа"
+          : usernameStatus === "taken"
+          ? "Этот никнейм уже занят"
+          : "Проверьте никнейм"
+      );
       setLoading(false);
       return;
     }
 
     try {
-      // Простая клиентская проверка уникальности (не 100% надёжна)
-      // const usernameDoc = await getDoc(doc(db, "usernames", username));
-      // if (usernameDoc.exists()) throw new Error("Username занят");
-
       const credential = await createUserWithEmailAndPassword(
         auth,
         email,
         password
       );
-      const user = credential.user;
 
-      await updateProfile(user, { displayName: username });
+      const user = credential.user;
+      await user.getIdToken(true);
+      const trimmed = username.trim();
+      const lower = trimmed.toLowerCase();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      // Резервируем ник в usernames (только для зарегистрированных)
+      await setDoc(doc(db, "usernames", lower), {
+        uid: user.uid,
+        username: trimmed,
+        createdAt: serverTimestamp(),
+      });
+
+      await updateProfile(user, { displayName: trimmed });
 
       await setDoc(doc(db, "users", user.uid), {
-        username,
-        displayName: username,
+        username: trimmed,
+        displayName: trimmed,
         email: user.email,
         isAnonymous: false,
         createdAt: serverTimestamp(),
         online: true,
         photoURL: null,
       });
-
-      // Опционально: сохраняем username → uid для поиска
-      // await setDoc(doc(db, "usernames", username), { uid: user.uid });
 
       onSuccess();
     } catch (err) {
@@ -119,6 +159,10 @@ export default function AuthScreen({ onSuccess }) {
       setLoading(false);
     }
   };
+
+  // ────────────────────────────────────────────────
+  // RENDER
+  // ────────────────────────────────────────────────
 
   if (mode === "initial") {
     return (
@@ -259,18 +303,66 @@ export default function AuthScreen({ onSuccess }) {
           onSubmit={handleRegister}
           style={{ display: "flex", flexDirection: "column", gap: "16px" }}
         >
-          <input
-            type="text"
-            placeholder="Username (будет виден в чате)"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.trim())}
-            required
-            style={{
-              padding: "12px",
-              borderRadius: "6px",
-              border: "1px solid #ccc",
-            }}
-          />
+          <div style={{ position: "relative" }}>
+            <input
+              type="text"
+              placeholder="Username (минимум 3 символа)"
+              value={username}
+              onChange={(e) => setUsername(e.target.value.trimStart())}
+              required
+              style={{
+                padding: "12px",
+                borderRadius: "6px",
+                border: "1px solid #ccc",
+                width: "100%",
+              }}
+            />
+
+            {usernameStatus === "checking" && (
+              <small
+                style={{
+                  color: "gray",
+                  position: "absolute",
+                  right: "12px",
+                  top: "14px",
+                }}
+              >
+                проверка...
+              </small>
+            )}
+            {usernameStatus === "available" && (
+              <small
+                style={{
+                  color: "green",
+                  position: "absolute",
+                  right: "12px",
+                  top: "14px",
+                }}
+              >
+                ✓ свободен
+              </small>
+            )}
+            {usernameStatus === "taken" && (
+              <small
+                style={{
+                  color: "red",
+                  position: "absolute",
+                  right: "12px",
+                  top: "14px",
+                }}
+              >
+                ✗ занят
+              </small>
+            )}
+            {usernameStatus === "short" && username.length > 0 && (
+              <small
+                style={{ color: "orange", display: "block", marginTop: "4px" }}
+              >
+                Минимум 3 символа
+              </small>
+            )}
+          </div>
+
           <input
             type="email"
             placeholder="Email"
@@ -283,6 +375,7 @@ export default function AuthScreen({ onSuccess }) {
               border: "1px solid #ccc",
             }}
           />
+
           <input
             type="password"
             placeholder="Пароль (минимум 6 символов)"
@@ -295,13 +388,15 @@ export default function AuthScreen({ onSuccess }) {
               border: "1px solid #ccc",
             }}
           />
+
           {error && <div style={{ color: "red" }}>{error}</div>}
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || usernameStatus !== "available"}
             style={{
               padding: "14px",
-              background: "#4CAF50",
+              background: usernameStatus === "available" ? "#4CAF50" : "#ccc",
               color: "white",
               border: "none",
               borderRadius: "8px",
@@ -310,6 +405,7 @@ export default function AuthScreen({ onSuccess }) {
             {loading ? "Создаём..." : "Зарегистрироваться"}
           </button>
         </form>
+
         <button
           onClick={() => setMode("initial")}
           style={{
